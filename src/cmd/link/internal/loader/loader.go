@@ -1610,13 +1610,24 @@ func (l *Loader) GetFuncDwarfAuxSyms(fnSymIdx Sym) (auxDwarfInfo, auxDwarfLoc, a
 	if l.SymType(fnSymIdx) != sym.STEXT {
 		log.Fatalf("error: non-function sym %d/%s t=%s passed to GetFuncDwarfAuxSyms", fnSymIdx, l.SymName(fnSymIdx), l.SymType(fnSymIdx).String())
 	}
+	var r *oReader
+	var auxs []goobj.Aux
 	if l.IsExternal(fnSymIdx) {
-		// Current expectation is that any external function will
-		// not have auxsyms.
-		return
+
+		origobjidx := l.getPayload(fnSymIdx).objidx
+		if origobjidx == 0 {
+			// Current expectation is that any external function will
+			// not have auxsyms other than trampolines.
+			return
+		}
+		r = l.objs[origobjidx].r
+		auxs = l.getPayload(fnSymIdx).auxs
+	} else {
+		var li uint32
+		r, li = l.toLocal(fnSymIdx)
+		auxs = r.Auxs(li)
 	}
-	r, li := l.toLocal(fnSymIdx)
-	auxs := r.Auxs(li)
+
 	for i := range auxs {
 		a := &auxs[i]
 		switch a.Type() {
