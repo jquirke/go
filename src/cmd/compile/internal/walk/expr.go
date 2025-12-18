@@ -617,6 +617,29 @@ func walkCall(n *ir.CallExpr, init *ir.Nodes) ir.Node {
 				return walkExpr(n.Args[1], init)
 			}
 		}
+		// Optimize strings.ToLower with constant lowercase ASCII argument
+		if fn != nil && fn.Sym().Pkg.Path == "strings" && fn.Sym().Name == "ToLower" {
+			if len(n.Args) == 1 && ir.IsConst(n.Args[0], constant.String) {
+				s := constant.StringVal(n.Args[0].Val())
+				// Check if string is ASCII-only and already lowercase
+				isASCII, hasUpper := true, false
+				for i := 0; i < len(s); i++ {
+					c := s[i]
+					if c >= 0x80 { // utf8.RuneSelf
+						isASCII = false
+						break
+					}
+					hasUpper = hasUpper || ('A' <= c && c <= 'Z')
+				}
+				if isASCII && !hasUpper {
+					// ASCII string with no uppercase letters, return argument directly
+					if base.Flag.LowerM > 0 {
+						base.WarnfAt(n.Pos(), "strings.ToLower with constant lowercase argument optimized to no-op")
+					}
+					return n.Args[0]
+				}
+			}
+		}
 	}
 
 	if name, ok := n.Fun.(*ir.Name); ok {
