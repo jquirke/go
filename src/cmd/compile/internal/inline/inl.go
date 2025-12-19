@@ -885,6 +885,17 @@ func InlineCallTarget(callerfn *ir.Func, call *ir.CallExpr, profile *pgoir.Profi
 	return inlCallee(callerfn, call.Fun, profile, true)
 }
 
+// allConstantArgs checks if all arguments to a call are compile-time constants
+func allConstantArgs(call *ir.CallExpr) bool {
+	for _, arg := range call.Args {
+		if !ir.IsConst(arg, constant.Int) && !ir.IsConst(arg, constant.String) &&
+			!ir.IsConst(arg, constant.Bool) && !ir.IsConst(arg, constant.Float) {
+			return false
+		}
+	}
+	return len(call.Args) > 0
+}
+
 // TryInlineCall returns an inlined call expression for call, or nil
 // if inlining is not possible.
 func TryInlineCall(callerfn *ir.Func, call *ir.CallExpr, bigCaller bool, profile *pgoir.Profile, closureCalledOnce bool) *ir.InlinedCallExpr {
@@ -898,10 +909,21 @@ func TryInlineCall(callerfn *ir.Func, call *ir.CallExpr, bigCaller bool, profile
 		return nil
 	}
 
-	if fn := inlCallee(callerfn, call.Fun, profile, false); fn != nil && typecheck.HaveInlineBody(fn) {
+	fn := inlCallee(callerfn, call.Fun, profile, false)
+	if fn == nil || !typecheck.HaveInlineBody(fn) {
+		return nil
+	}
+
+	// Force inline pure functions with constant arguments to enable SSA constant folding
+	if fn.Pragma&ir.Pure != 0 && allConstantArgs(call) {
+		if base.Flag.LowerM > 0 {
+			fmt.Printf("%v: inlining pure function %v with constant arguments for SSA folding\n",
+				ir.Line(call), fn.Sym().Name)
+		}
 		return mkinlcall(callerfn, call, fn, bigCaller, closureCalledOnce)
 	}
-	return nil
+
+	return mkinlcall(callerfn, call, fn, bigCaller, closureCalledOnce)
 }
 
 // inlCallee takes a function-typed expression and returns the underlying function ONAME
