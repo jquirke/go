@@ -24,6 +24,7 @@ import (
 	"math/bits"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -463,6 +464,66 @@ func isSameCall(aux Aux, name string) bool {
 	return fn != nil && fn.String() == name
 }
 
+// isASCII reports whether s contains only ASCII characters.
+func isASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= 0x80 {
+			return false
+		}
+	}
+	return true
+}
+
+// stringToLower converts an ASCII string to lowercase.
+// Caller must ensure s is ASCII-only by calling isASCII first.
+func stringToLower(s string) string {
+	result := make([]byte, len(s))
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if 'A' <= c && c <= 'Z' {
+			c = c + ('a' - 'A')
+		}
+		result[i] = c
+	}
+	return string(result)
+}
+
+// isASCIIGoString checks if a go:string.XXX symbol contains only ASCII.
+func isASCIIGoString(aux Aux) bool {
+	s := goStringSymToString(aux)
+	return s != "" && isASCII(s)
+}
+
+// goStringToLower converts a go:string.XXX symbol to its lowercase equivalent.
+func goStringToLower(aux Aux) Aux {
+	s := goStringSymToString(aux)
+	return stringToAux(stringToLower(s))
+}
+
+// goStringSymToString extracts the string value from a go:string.XXX symbol.
+// Returns empty string if the symbol is not a string constant.
+func goStringSymToString(aux Aux) string {
+	sym := auxToSym(aux)
+	if sym == nil {
+		return ""
+	}
+	lsym, ok := sym.(*obj.LSym)
+	if !ok {
+		return ""
+	}
+	const prefix = "go:string."
+	name := lsym.Name
+	if !strings.HasPrefix(name, prefix) {
+		return ""
+	}
+	quoted := name[len(prefix):]
+	s, err := strconv.Unquote(quoted)
+	if err != nil {
+		return ""
+	}
+	return s
+}
+
 func isMalloc(aux Aux) bool {
 	return isNewObject(aux) || isSpecializedMalloc(aux)
 }
@@ -792,6 +853,9 @@ func (stringAux) CanBeAnSSAAux() {}
 
 func auxToString(i Aux) string {
 	return string(i.(stringAux))
+}
+func stringToAux(s string) Aux {
+	return stringAux(s)
 }
 func auxToSym(i Aux) Sym {
 	// TODO: kind of a hack - allows nil interface through

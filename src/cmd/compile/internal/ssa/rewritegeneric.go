@@ -29849,6 +29849,63 @@ func rewriteValuegeneric_OpSelectN(v *Value) bool {
 	b := v.Block
 	config := b.Func.Config
 	typ := &b.Func.Config.Types
+	// match: (SelectN [0] call:(StaticLECall {callAux} (StringMake (Addr {s} _) _) mem))
+	// cond: isSameCall(callAux, "strings.ToLower") && isASCIIGoString(s) && clobber(call)
+	// result: (ConstString <typ.String> {auxToString(goStringToLower(s))})
+	for {
+		if auxIntToInt64(v.AuxInt) != 0 {
+			break
+		}
+		call := v_0
+		if call.Op != OpStaticLECall || len(call.Args) != 2 {
+			break
+		}
+		callAux := auxToCall(call.Aux)
+		call_0 := call.Args[0]
+		if call_0.Op != OpStringMake {
+			break
+		}
+		call_0_0 := call_0.Args[0]
+		if call_0_0.Op != OpAddr {
+			break
+		}
+		s := auxToSym(call_0_0.Aux)
+		if !(isSameCall(callAux, "strings.ToLower") && isASCIIGoString(s) && clobber(call)) {
+			break
+		}
+		v.reset(OpConstString)
+		v.Type = typ.String
+		v.Aux = stringToAux(auxToString(goStringToLower(s)))
+		return true
+	}
+	// match: (SelectN [1] call:(StaticLECall {callAux} (StringMake (Addr {s} _) _) mem))
+	// cond: isSameCall(callAux, "strings.ToLower") && isASCIIGoString(s)
+	// result: mem
+	for {
+		if auxIntToInt64(v.AuxInt) != 1 {
+			break
+		}
+		call := v_0
+		if call.Op != OpStaticLECall || len(call.Args) != 2 {
+			break
+		}
+		callAux := auxToCall(call.Aux)
+		mem := call.Args[1]
+		call_0 := call.Args[0]
+		if call_0.Op != OpStringMake {
+			break
+		}
+		call_0_0 := call_0.Args[0]
+		if call_0_0.Op != OpAddr {
+			break
+		}
+		s := auxToSym(call_0_0.Aux)
+		if !(isSameCall(callAux, "strings.ToLower") && isASCIIGoString(s)) {
+			break
+		}
+		v.copyOf(mem)
+		return true
+	}
 	// match: (SelectN [n] m:(MakeResult ___))
 	// result: m.Args[n]
 	for {

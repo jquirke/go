@@ -975,6 +975,10 @@
 (IMake _typ (ArrayMake1 val)) => (IMake _typ val)
 (ArraySelect [0] (IData x)) => (IData x)
 
+// Fold strings.ToLower with constant ASCII strings
+(SelectN [0] call:(StaticLECall {callAux} (StringMake (Addr {s} _) _) mem)) && isSameCall(callAux, "strings.ToLower") && isASCIIGoString(s) && clobber(call) => (ConstString <typ.String> {auxToString(goStringToLower(s))})
+(SelectN [1] call:(StaticLECall {callAux} (StringMake (Addr {s} _) _) mem)) && isSameCall(callAux, "strings.ToLower") && isASCIIGoString(s) => mem
+
 // string ops
 // Decomposing StringMake and lowering of StringPtr and StringLen
 // happens in a later pass, dec, so that these operations are available
