@@ -440,6 +440,7 @@ const (
 	CgoUnsafeArgs               // treat a pointer to one arg as a pointer to them all
 	UintptrKeepAlive            // pointers converted to uintptr must be kept alive
 	UintptrEscapes              // pointers converted to uintptr escape
+	Pure                        // func is pure (no side effects, same inputs → same outputs)
 
 	// Runtime-only func pragmas.
 	// See ../../../../runtime/HACKING.md for detailed descriptions.
