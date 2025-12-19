@@ -724,6 +724,8 @@ func ToUpper(s string) string {
 }
 
 // ToLower returns s with all Unicode letters mapped to their lower case.
+//
+//go:pure
 func ToLower(s string) string {
 	isASCII, hasUpper := true, false
 	for i := 0; i < len(s); i++ {

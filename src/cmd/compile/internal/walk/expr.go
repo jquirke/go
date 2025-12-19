@@ -617,6 +617,15 @@ func walkCall(n *ir.CallExpr, init *ir.Nodes) ir.Node {
 				return walkExpr(n.Args[1], init)
 			}
 		}
+
+		// Try to evaluate pure functions with constant arguments at compile time
+		if fn != nil && fn.Func != nil && fn.Func.Pragma&ir.Pure != 0 {
+			if allArgsConstant(n.Args, fn.Type().Params()) {
+				if result := evaluatePureFunctionAtCompileTime(fn.Func, n.Args); result != nil {
+					return walkExpr(result, init)
+				}
+			}
+		}
 	}
 
 	if name, ok := n.Fun.(*ir.Name); ok {
