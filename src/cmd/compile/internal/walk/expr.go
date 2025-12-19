@@ -7,6 +7,7 @@ package walk
 import (
 	"fmt"
 	"go/constant"
+	"go/token"
 	"internal/abi"
 	"internal/buildcfg"
 	"strings"
@@ -617,6 +618,29 @@ func walkCall(n *ir.CallExpr, init *ir.Nodes) ir.Node {
 				return walkExpr(n.Args[1], init)
 			}
 		}
+		// Constant folding for pure functions with constant arguments
+		if fn != nil && fn.Func != nil && fn.Func.Pragma&ir.Pure != 0 {
+			// Check if all arguments are constants
+			allConst := true
+			for _, arg := range n.Args {
+				if !ir.IsConst(arg, constant.Int) && !ir.IsConst(arg, constant.String) &&
+				   !ir.IsConst(arg, constant.Bool) && !ir.IsConst(arg, constant.Float) {
+					allConst = false
+					break
+				}
+			}
+
+			if allConst && len(n.Args) > 0 {
+				// Try to evaluate the pure function at compile time
+				result := tryEvaluatePureFunction(fn, n.Args)
+				if result != nil {
+					if base.Flag.LowerM > 0 {
+						base.WarnfAt(n.Pos(), "pure function %v with constant arguments evaluated at compile time", fn.Sym().Name)
+					}
+					return result
+				}
+			}
+		}
 	}
 
 	if name, ok := n.Fun.(*ir.Name); ok {
@@ -1139,4 +1163,102 @@ func usefield(n *ir.SelectorExpr) {
 		ir.CurFunc.FieldTrack = make(map[*obj.LSym]struct{})
 	}
 	ir.CurFunc.FieldTrack[sym] = struct{}{}
+}
+
+// tryEvaluatePureFunction attempts to evaluate a pure function at compile time
+// with constant arguments. Returns nil if evaluation is not possible.
+func tryEvaluatePureFunction(fn *ir.Name, args []ir.Node) ir.Node {
+	if fn.Func == nil || fn.Func.Body == nil {
+		return nil // Can't evaluate without function body
+	}
+
+	// For now, only handle simple integer arithmetic functions
+	// This is a proof-of-concept that can be extended
+
+	// Check function has simple structure we can interpret
+	body := fn.Func.Body
+	if len(body) != 1 {
+		return nil // Only handle single-statement bodies for now
+	}
+
+	stmt := body[0]
+
+	// Handle two cases:
+	// 1. Direct return: return a + b
+	// 2. Assignment to result variable: ~r0 = a + b (followed by implicit return)
+	var result ir.Node
+
+	if ret, ok := stmt.(*ir.ReturnStmt); ok {
+		if len(ret.Results) != 1 {
+			return nil
+		}
+		result = ret.Results[0]
+	} else if assign, ok := stmt.(*ir.AssignStmt); ok {
+		// Assignment to result variable
+		result = assign.Y
+	} else {
+		return nil
+	}
+
+	// If the result is itself an assignment (compiler-generated), unwrap it
+	if assign, ok := result.(*ir.AssignStmt); ok {
+		result = assign.Y
+	}
+
+	// Try to evaluate the return expression with constant arguments
+	val := tryEvaluateExpr(result, fn, args)
+	if val == nil {
+		return nil
+	}
+
+	// Create constant node with the evaluated value
+	// Get the return type from the function
+	retType := fn.Type().Results()[0].Type
+	return ir.NewBasicLit(fn.Pos(), retType, val)
+}
+
+// tryEvaluateExpr attempts to evaluate an expression by substituting
+// function parameters with constant arguments
+func tryEvaluateExpr(expr ir.Node, fn *ir.Name, args []ir.Node) constant.Value {
+	switch n := expr.(type) {
+	case *ir.Name:
+		// Check if this is a parameter
+		for i, param := range fn.Func.Dcl {
+			if param == n && i < len(args) {
+				// Substitute with constant argument
+				return args[i].Val()
+			}
+		}
+		return nil
+
+	case *ir.BinaryExpr:
+		// Evaluate binary operations
+		left := tryEvaluateExpr(n.X, fn, args)
+		right := tryEvaluateExpr(n.Y, fn, args)
+		if left == nil || right == nil {
+			return nil
+		}
+
+		switch n.Op() {
+		case ir.OADD:
+			return constant.BinaryOp(left, token.ADD, right)
+		case ir.OSUB:
+			return constant.BinaryOp(left, token.SUB, right)
+		case ir.OMUL:
+			return constant.BinaryOp(left, token.MUL, right)
+		case ir.ODIV:
+			return constant.BinaryOp(left, token.QUO, right)
+		case ir.OMOD:
+			return constant.BinaryOp(left, token.REM, right)
+		default:
+			return nil
+		}
+
+	case *ir.BasicLit:
+		// Already a constant
+		return n.Val()
+
+	default:
+		return nil
+	}
 }
